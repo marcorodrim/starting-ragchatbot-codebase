@@ -3,9 +3,10 @@ const API_URL = '/api';
 
 // Global state
 let currentSessionId = null;
+let currentAbortController = null;
 
 // DOM elements
-let chatMessages, chatInput, sendButton, totalCourses, courseTitles;
+let chatMessages, chatInput, sendButton, newChatButton, totalCourses, courseTitles;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -13,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chatMessages = document.getElementById('chatMessages');
     chatInput = document.getElementById('chatInput');
     sendButton = document.getElementById('sendButton');
+    newChatButton = document.getElementById('newChatButton');
     totalCourses = document.getElementById('totalCourses');
     courseTitles = document.getElementById('courseTitles');
     
@@ -28,7 +30,8 @@ function setupEventListeners() {
     chatInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendMessage();
     });
-    
+    newChatButton.addEventListener('click', startNewChat);
+
     
     // Suggested questions
     document.querySelectorAll('.suggested-item').forEach(button => {
@@ -59,9 +62,13 @@ async function sendMessage() {
     chatMessages.appendChild(loadingMessage);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
+    const abortController = new AbortController();
+    currentAbortController = abortController;
+
     try {
         const response = await fetch(`${API_URL}/query`, {
             method: 'POST',
+            signal: abortController.signal,
             headers: {
                 'Content-Type': 'application/json',
             },
@@ -85,10 +92,16 @@ async function sendMessage() {
         addMessage(data.answer, 'assistant', data.sources);
 
     } catch (error) {
+        // Request was cancelled by starting a new chat - nothing to show
+        if (error.name === 'AbortError') return;
+
         // Replace loading message with error
         loadingMessage.remove();
         addMessage(`Error: ${error.message}`, 'assistant');
     } finally {
+        if (currentAbortController === abortController) {
+            currentAbortController = null;
+        }
         chatInput.disabled = false;
         sendButton.disabled = false;
         chatInput.focus();
@@ -122,10 +135,16 @@ function addMessage(content, type, sources = null, isWelcome = false) {
     let html = `<div class="message-content">${displayContent}</div>`;
     
     if (sources && sources.length > 0) {
+        const sourceItems = sources.map(source => {
+            if (typeof source === 'string') return escapeHtml(source);
+            const text = escapeHtml(source.text);
+            if (!source.link) return text;
+            return `<a href="${escapeHtml(source.link)}" target="_blank" rel="noopener noreferrer" class="source-link">${text}</a>`;
+        });
         html += `
             <details class="sources-collapsible">
                 <summary class="sources-header">Sources</summary>
-                <div class="sources-content">${sources.join(', ')}</div>
+                <div class="sources-content">${sourceItems.join(', ')}</div>
             </details>
         `;
     }
@@ -150,6 +169,26 @@ async function createNewSession() {
     currentSessionId = null;
     chatMessages.innerHTML = '';
     addMessage('Welcome to the Course Materials Assistant! I can help you with questions about courses, lessons and specific content. What would you like to know?', 'assistant', null, true);
+}
+
+// Reset the chat in place and discard the old session on the backend
+function startNewChat() {
+    if (currentAbortController) {
+        currentAbortController.abort();
+        currentAbortController = null;
+    }
+
+    const oldSessionId = currentSessionId;
+    if (oldSessionId) {
+        fetch(`${API_URL}/session/${encodeURIComponent(oldSessionId)}`, { method: 'DELETE' })
+            .catch(error => console.error('Failed to delete session:', error));
+    }
+
+    createNewSession();
+    chatInput.value = '';
+    chatInput.disabled = false;
+    sendButton.disabled = false;
+    chatInput.focus();
 }
 
 // Load course statistics

@@ -78,7 +78,7 @@ class CourseSearchTool(Tool):
             filter_info = ""
             if course_name:
                 filter_info += f" in course '{course_name}'"
-            if lesson_number:
+            if lesson_number is not None:
                 filter_info += f" in lesson {lesson_number}"
             return f"No relevant content found{filter_info}."
         
@@ -100,11 +100,15 @@ class CourseSearchTool(Tool):
                 header += f" - Lesson {lesson_num}"
             header += "]"
             
-            # Track source for the UI
+            # Track source for the UI, with lesson link (falls back to course link)
             source = course_title
+            link = None
             if lesson_num is not None:
                 source += f" - Lesson {lesson_num}"
-            sources.append(source)
+                link = self.store.get_lesson_link(course_title, lesson_num)
+            if not link:
+                link = self.store.get_course_link(course_title)
+            sources.append({"text": source, "link": link})
             
             formatted.append(f"{header}\n{doc}")
         
@@ -112,6 +116,63 @@ class CourseSearchTool(Tool):
         self.last_sources = sources
         
         return "\n\n".join(formatted)
+
+
+class CourseOutlineTool(Tool):
+    """Tool for retrieving a course outline (title, link, lesson list) from the course catalog"""
+
+    def __init__(self, vector_store: VectorStore):
+        self.store = vector_store
+        self.last_sources = []  # Track sources from last lookup
+
+    def get_tool_definition(self) -> Dict[str, Any]:
+        """Return Anthropic tool definition for this tool"""
+        return {
+            "name": "get_course_outline",
+            "description": "Get a course's outline: title, course link, and the complete list of lessons (number and title)",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "course_title": {
+                        "type": "string",
+                        "description": "Course title (partial matches work, e.g. 'MCP', 'Introduction')"
+                    }
+                },
+                "required": ["course_title"]
+            }
+        }
+
+    def execute(self, course_title: str) -> str:
+        """
+        Execute the outline lookup.
+
+        Args:
+            course_title: Course title (fuzzy matched against the catalog)
+
+        Returns:
+            Formatted course outline or error message
+        """
+        outline = self.store.get_course_outline(course_title)
+        if not outline:
+            return f"No course found matching '{course_title}'"
+
+        title = outline["title"]
+        link = outline.get("course_link")
+        lessons = outline.get("lessons", [])
+
+        lines = [
+            f"Course Title: {title}",
+            f"Course Link: {link or 'N/A'}",
+            f"Lessons ({len(lessons)}):"
+        ]
+        for lesson in lessons:
+            lines.append(f"Lesson {lesson.get('lesson_number')}: {lesson.get('lesson_title')}")
+
+        # Store source for the UI
+        self.last_sources = [{"text": title, "link": link}]
+
+        return "\n".join(lines)
+
 
 class ToolManager:
     """Manages available tools for the AI"""
@@ -136,7 +197,8 @@ class ToolManager:
         """Execute a tool by name with given parameters"""
         if tool_name not in self.tools:
             return f"Tool '{tool_name}' not found"
-        
+
+        # Exceptions propagate; AIGenerator turns them into error tool_results
         return self.tools[tool_name].execute(**kwargs)
     
     def get_last_sources(self) -> list:

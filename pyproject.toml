@@ -13,3 +13,14 @@ dependencies = [
     "python-multipart==0.0.20",
     "python-dotenv==1.1.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+markers = ["live: hits the real Anthropic API (opt-in, needs ANTHROPIC_API_KEY)"]
+addopts = "-m 'not live'"
