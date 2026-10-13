@@ -115,3 +115,102 @@ def tool_use_block(name, tool_input, block_id="toolu_01"):
 
 def make_response(*blocks, stop_reason="end_turn"):
     return SimpleNamespace(content=list(blocks), stop_reason=stop_reason)
+
+
+# ---------------------------------------------------------------------------
+# API test app
+# ---------------------------------------------------------------------------
+# app.py builds a real RAGSystem and mounts ../frontend as static files at
+# import time, neither of which works in the test environment. Instead we
+# build a test app that mirrors app.py's API endpoints, backed by a mock
+# RAGSystem, and serves a stub page at "/" in place of the static mount.
+
+SAMPLE_SOURCES = [
+    {"text": f"{RAG_COURSE} - Lesson 1", "link": f"{RAG_COURSE_LINK}/1"},
+    {"text": f"{MCP_COURSE} - Lesson 1", "link": None},
+]
+
+ROOT_HTML = "<!DOCTYPE html><html><body><h1>Course Materials Assistant</h1></body></html>"
+
+
+@pytest.fixture
+def mock_rag_system():
+    """Mock RAGSystem with canned answers, sources, and analytics"""
+    rag = Mock()
+    rag.session_manager.create_session.return_value = "session_1"
+    rag.query.return_value = ("Vector databases store embeddings.", SAMPLE_SOURCES)
+    rag.get_course_analytics.return_value = {
+        "total_courses": 2,
+        "course_titles": [RAG_COURSE, MCP_COURSE],
+    }
+    return rag
+
+
+def create_test_app(rag_system):
+    """Build a FastAPI app exposing the same API as app.py, without static files"""
+    from typing import List, Optional
+
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import HTMLResponse
+    from pydantic import BaseModel
+
+    app = FastAPI(title="Course Materials RAG System (test)")
+
+    class QueryRequest(BaseModel):
+        query: str
+        session_id: Optional[str] = None
+
+    class Source(BaseModel):
+        text: str
+        link: Optional[str] = None
+
+    class QueryResponse(BaseModel):
+        answer: str
+        sources: List[Source]
+        session_id: str
+
+    class CourseStats(BaseModel):
+        total_courses: int
+        course_titles: List[str]
+
+    @app.post("/api/query", response_model=QueryResponse)
+    async def query_documents(request: QueryRequest):
+        try:
+            session_id = request.session_id
+            if not session_id:
+                session_id = rag_system.session_manager.create_session()
+            answer, sources = rag_system.query(request.query, session_id)
+            return QueryResponse(answer=answer, sources=sources, session_id=session_id)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/courses", response_model=CourseStats)
+    async def get_course_stats():
+        try:
+            analytics = rag_system.get_course_analytics()
+            return CourseStats(
+                total_courses=analytics["total_courses"],
+                course_titles=analytics["course_titles"],
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.delete("/api/session/{session_id}")
+    async def delete_session(session_id: str):
+        rag_system.session_manager.delete_session(session_id)
+        return {"status": "ok"}
+
+    @app.get("/", response_class=HTMLResponse)
+    async def root():
+        return ROOT_HTML
+
+    return app
+
+
+@pytest.fixture
+def client(mock_rag_system):
+    """TestClient for the test app, backed by mock_rag_system"""
+    from fastapi.testclient import TestClient
+
+    with TestClient(create_test_app(mock_rag_system)) as test_client:
+        yield test_client
