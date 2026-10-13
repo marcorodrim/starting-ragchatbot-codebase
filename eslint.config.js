@@ -13,6 +13,9 @@ export default [
                 console: 'readonly',
                 fetch: 'readonly',
                 AbortController: 'readonly',
+                localStorage: 'readonly',
+                setTimeout: 'readonly',
+                clearTimeout: 'readonly',
                 // Loaded from CDN in index.html
                 marked: 'readonly',
             },
