@@ -20,7 +20,7 @@ cd backend && uv run uvicorn app:app --reload --port 8000   # manual start
 - **Always use `uv`** — run the server with `uv run` (or `./run.sh`) and manage dependencies with `uv add`/`uv sync`. Never call `pip` directly.
 - Web UI: http://localhost:8000 — API docs: http://localhost:8000/docs
 - The server **must be started from `backend/`**: `app.py` uses relative paths (`../docs`, `../frontend`) and `config.py` stores ChromaDB at `./chroma_db` (i.e. `backend/chroma_db`).
-- There is no test suite, linter, or formatter configured. `main.py` at the root is an unused placeholder.
+- Frontend code quality (Node tooling at the repo root, not in `frontend/`, so `node_modules` is never served as static files): `./scripts/format-frontend.sh` auto-formats with Prettier + ESLint `--fix`; `./scripts/check-frontend.sh` verifies without modifying (non-zero exit on failure). Also available as `npm run format` / `npm run quality`. No Python formatter/linter is configured. `main.py` at the root is an unused placeholder.
 
 ## Architecture
 
