@@ -1,0 +1,6 @@
+# Only the frontend is formatted by Prettier
+node_modules/
+backend/
+docs/
+*.md
+uv.lock
